@@ -65,7 +65,7 @@ class SKG:
         pol_path = Path(policy_path)      if policy_path      else _DEFAULT_POLICY
         att_path = Path(attestation_path) if attestation_path else _DEFAULT_ATTEST
 
-        self._store       = NodeStore(db_path)
+        self._store       = NodeStore(db_path).connect()
         self._policy      = (
             PolicyEngine(pol_path) if pol_path.exists()
             else default_allow_policy()
