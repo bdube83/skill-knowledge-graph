@@ -17,3 +17,5 @@ nodes/*/target/
 # IDE
 .idea/
 .vscode/
+eval/corpus.jsonl
+eval/results/

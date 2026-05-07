@@ -1,0 +1,36 @@
+task_type: reviewer_ping_draft
+header: "Draft a reviewer-ping message for a pull request."
+tags:
+  - git
+  - review
+  - communication
+requested_capabilities:
+  - effect: text.generate
+    adapter: local
+forbidden_capabilities: []
+preconditions: []
+verifiers:
+  - name: message_present
+    check: "bool(output.get('message', ''))"
+  - name: message_is_string
+    check: "isinstance(output.get('message', ''), str)"
+input_schema:
+  type: object
+  properties:
+    pr_number:
+      type: integer
+    repo:
+      type: string
+    author:
+      type: string
+    reviewers:
+      type: array
+      items:
+        type: string
+  required: [pr_number, repo, author]
+output_schema:
+  type: object
+  properties:
+    message:
+      type: string
+  required: [message]
