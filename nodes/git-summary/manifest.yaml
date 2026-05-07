@@ -1,0 +1,33 @@
+task_type: git_summary
+header: Summarise recent git commits for a repository branch.
+requested_capabilities:
+  - effect: git.read
+    adapter: local
+forbidden_capabilities: []
+preconditions: []
+verifiers:
+  - name: summary_present
+    check: "bool(output.get('summary', ''))"
+  - name: commit_count_is_int
+    check: "isinstance(output.get('commit_count', None), int)"
+input_schema:
+  type: object
+  properties:
+    repo: { type: string }
+    branch: { type: string }
+    commits:
+      type: array
+      items:
+        type: object
+        properties:
+          sha: { type: string }
+          author: { type: string }
+          message: { type: string }
+output_schema:
+  type: object
+  properties:
+    summary: { type: string }
+    authors:
+      type: array
+      items: { type: string }
+    commit_count: { type: integer }

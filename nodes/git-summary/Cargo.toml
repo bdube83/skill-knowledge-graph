@@ -1,0 +1,17 @@
+[package]
+name = "git-summary"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "git-summary"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = { version = "1", features = ["alloc"], default-features = false }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

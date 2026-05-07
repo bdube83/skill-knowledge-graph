@@ -1,0 +1,24 @@
+task_type: doc_update
+header: Update a documentation section given a change description.
+requested_capabilities:
+  - effect: text.generate
+    adapter: local
+forbidden_capabilities: []
+preconditions: []
+verifiers:
+  - name: updated_section_present
+    check: "bool(output.get('updated_section', ''))"
+  - name: change_summary_is_string
+    check: "isinstance(output.get('change_summary', ''), str)"
+input_schema:
+  type: object
+  properties:
+    doc_path: { type: string }
+    section_title: { type: string }
+    existing_content: { type: string }
+    change_description: { type: string }
+output_schema:
+  type: object
+  properties:
+    updated_section: { type: string }
+    change_summary: { type: string }
