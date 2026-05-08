@@ -286,7 +286,7 @@ def test_install_command_prints_claude_code_block(monkeypatch, capsys, tmp_path)
     monkeypatch.setattr("pathlib.Path.home", lambda: tmp_path / "user-home")
     (tmp_path / "user-home").mkdir(parents=True, exist_ok=True)
 
-    rc = cli.main(["install", "--client", "claude-code"])
+    rc = cli.main(["install", "--client", "claude-code", "--launch", "skg-mcp"])
     assert rc == cli.EXIT_OK
     out = capsys.readouterr().out
     payload = json.loads(out.split("\n\n")[0]) if "\n\n" in out else json.loads(out)
@@ -311,7 +311,7 @@ def test_install_write_merges_into_claude_code(monkeypatch, capsys, tmp_path):
         encoding="utf-8",
     )
 
-    rc = cli.main(["install", "--client", "claude-code", "--write"])
+    rc = cli.main(["install", "--client", "claude-code", "--launch", "skg-mcp", "--write"])
     assert rc == cli.EXIT_OK
     capsys.readouterr()
 
