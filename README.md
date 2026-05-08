@@ -1,206 +1,235 @@
-# Skill Knowledge Graph: Capability-Token Enforcement for LLM-Synthesized Procedures
+# Skill Knowledge Graph
 
-Reproducibility guide for the SKG paper. Clone, install, run the listed
-commands, and the numbers in `paper.md` come back.
+Capability-token enforcement at the WASM import layer for
+LLM-synthesized procedures. SKG sits between an LLM agent and the
+operations it wants to perform, so the runtime, not the manifest,
+decides what each call may do.
 
-## Table of contents
+This README is the integration guide. The accompanying paper at
+[`paper.md`](paper.md) covers the design, evaluation methodology,
+and measurements; the reproducibility steps for those measurements
+live at [`docs/paper-reproduction.md`](docs/paper-reproduction.md).
 
-1. [What is in the repo](#what-is-in-the-repo)
-2. [Quick install](#quick-install)
-3. [Reproducing the measurements](#reproducing-the-measurements)
-4. [Reproducing the figures](#reproducing-the-figures)
-5. [Multi-rater workflow](#multi-rater-workflow)
-6. [Test suite](#test-suite)
-7. [Code layout](#code-layout)
-8. [License and citation](#license-and-citation)
-9. [Status notes and gotchas](#status-notes-and-gotchas)
+## Why use SKG
 
-## What is in the repo
+- You want an LLM agent to call host functions (HTTP, git, local
+  files, secrets, external messages) under capability-token
+  enforcement instead of trust-the-manifest semantics.
+- You want a routing layer that picks a verified Rust-to-WASI
+  procedure for known task families before falling back to the
+  LLM, so recurring work runs faster and (above ~120 input tokens
+  per task) cheaper.
+- You want every external operation a node performs to be auditable
+  via append-only attestation files under `~/.skg/`.
 
-`skg/` is the system: router, policy, Wasmtime launcher, and the four
-baseline runtimes (B, C, D, E) used in the paper's containment matrix.
-`paper.md` (also rendered as `paper.pdf` and `paper.html`) is the writeup.
-`figures/` holds the architecture diagram source and the rendered PNGs.
+If your agent always falls back to the LLM, SKG adds latency without
+saving tokens. The break-even per-task LLM input is the routing
+header cost, ~120 tokens. See `paper.md` Section 7.4 for measured
+numbers.
 
-## Quick install
+## Install
 
-Python 3.13 in a virtualenv. Python 3.11 and 3.12 are also supported per
-`pyproject.toml`.
+Python 3.13 is required (the package targets it; `pyproject.toml`
+classifiers).
 
 ```bash
-git clone https://github.com/bdube83/skill-knowledge-graph
+git clone https://github.com/bdube83/skill-knowledge-graph.git
 cd skill-knowledge-graph
 python3.13 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+.venv/bin/pip install -e .
 ```
 
-Runtime dependencies pulled by `pyproject.toml`: `pyyaml`, `wasmtime`,
-`qdrant-client`, `openai`, `krippendorff`, `numpy`. Dev extras add
-`pytest` and `pytest-cov`.
+Optional but useful at integration time: an OpenAI key (or another
+LLM key your code uses) at `~/.agent-proxy/openai-key`. SKG itself
+does not call an LLM; the integration helper at
+`skg.integrations.agent_proxy` calls one only on a miss when the
+caller passes `synthesize_on_miss=True`.
 
-OpenAI key. The runners that call `gpt-4o-mini` read the key from
-`~/.agent-proxy/openai-key` (a one-line file containing the secret),
-not from `OPENAI_API_KEY`. Create the file before running any
-LLM-touching command:
+## Quick start
+
+The simplest integration: route a task through SKG, prepend the
+routing summary to your prompt, fall back to your LLM on a miss.
+
+```python
+from skg.integrations.agent_proxy import route_proposal, build_prompt_prefix
+
+result = route_proposal("Draft a reviewer ping for PR review")
+
+if result.hit:
+    prefix = build_prompt_prefix(result)
+    prompt = prefix + "\n" + your_existing_prompt
+    response = your_llm.chat(prompt)
+else:
+    response = your_llm.chat(your_existing_prompt)
+```
+
+`RouteResult` carries `hit`, `node`, `stage`, `grant`. On a miss
+the caller falls through; on a hit you can either use the node's
+header as a prompt prefix (above) or execute the WASM artifact
+directly (below).
+
+## Direct execution under capability-token enforcement
+
+```python
+from pathlib import Path
+from skg.wasmtime_launcher import WasmtimeRuntime
+
+rt = WasmtimeRuntime()
+result = rt.execute(
+    wasm_path=Path("nodes/reviewer-ping-draft/target/wasm32-wasip1/release/reviewer_ping_draft.wasm"),
+    node_id="reviewer-ping-draft",
+    task="draft reviewer ping",
+    context={"pr_number": 42, "repo": "x/y", "author": "alice", "reviewers": ["bob"]},
+    granted_effects=["text.generate"],
+)
+print(result.success, result.output, result.observed_effects)
+```
+
+The runtime wires only the WASI and `skg.*` host imports the grant
+set permits. A node that imports a host function it was not granted
+fails at instantiate-time, not at call-time. See `skg/cap_to_imports.py`
+for the effect-to-import mapping and `skg/host_imports.py` for the
+per-call grant validation.
+
+## Effect classes
+
+The kernel understands twelve generic effect classes plus
+`text.generate`. They live in `skg/effects.py`:
+
+```
+local.read   local.write
+network.read network.write
+external.draft external.send (approval-gated)
+browser.read browser.write
+git.read     git.write     (approval-gated)
+secret.read
+production.write           (approval-gated)
+text.generate
+```
+
+Approval-gated effects require a non-zero approval token at call
+time (`skg/cap_to_imports.py:APPROVAL_HOST`). The runtime returns
+`ERRNO_DENIED` (13) when the token is zero.
+
+## Adding a new node
+
+A node is a Rust crate compiled to WASI plus a manifest and a header.
+Skeleton:
+
+```
+nodes/<node-id>/
+  Cargo.toml
+  manifest.yaml         # task_type, header, tags, requested_capabilities
+  src/main.rs           # reads task+context+grants from stdin, writes JSON to stdout
+```
+
+The three reference nodes under `nodes/` (reviewer-ping-draft,
+git-summary, doc-update) are the working templates. Build with:
 
 ```bash
-mkdir -p ~/.agent-proxy
-printf 'sk-...' > ~/.agent-proxy/openai-key
-chmod 600 ~/.agent-proxy/openai-key
+cd nodes/<node-id>
+cargo build --release --target wasm32-wasip1
 ```
 
-Rust toolchain (only for the WASI sample node used in `test_wasmtime.py`
-and `tests/test_local_wasi.py`):
+The .wasm artifact lands at
+`nodes/<node-id>/target/wasm32-wasip1/release/<node>.wasm`. Place
+the manifest at `~/.skg/nodes/<node-id>/manifest.yaml` (or pass
+`store_path` to `SKG()` to use a different root) and call
+`skg.add_node(...)`.
+
+## Routing pipeline
+
+The router's four stages are `exact`, `fts`, `vector`, and
+`graph composition` (`skg/router.py`). On a miss the router
+returns `RouteResult(hit=False, ...)`; the caller decides whether
+to fall back to an LLM or to ask the user.
+
+```python
+from skg.graph import SKG
+
+skg = SKG()
+result = skg.route("Draft a reviewer ping", {"pr_number": 1})
+print(result.hit, result.stage, result.node and result.node.id)
+```
+
+## Manifest scopes (Phase 3d)
+
+Per-effect URL patterns and path scopes go in the manifest under
+`requested_capabilities`. The launcher reads them when you pass
+`manifest_path=` to `execute(...)`:
+
+```yaml
+requested_capabilities:
+  - effect:        network.read
+    url_pattern:   "https://api.allowed.example/*"
+  - effect:        local.read
+    path_scope:    "/workspace/data"
+```
+
+When `manifest_path` is omitted the launcher mints wildcard
+scopes for backward compatibility.
+
+## Adversarial test surface
+
+`tests/test_security.py`, `tests/test_containment_matrix.py`,
+`tests/test_scoped_enforcement.py`, `tests/test_confused_deputy.py`,
+and `tests/test_local_wasi.py` together exercise four attack
+classes (manifest lies, path escape, WASI introspection, confused
+deputy) end-to-end through real WASM execution. Use them as the
+contract specification for the runtime gate.
 
 ```bash
-rustup target add wasm32-wasip1
-cd nodes/reviewer-ping-draft && cargo build --release --target wasm32-wasip1 && cd ../..
+.venv/bin/python -m pytest tests/ -q
+# 221 tests as of commit fa0644c
 ```
-
-## Reproducing the measurements
-
-Every runner writes to `eval/results/`. That directory is gitignored;
-the runners recreate it.
-
-### Step 0: build the synthetic corpora
-
-`eval/corpus.jsonl` and `eval/corpus_large.jsonl` are gitignored. Generate
-them deterministically:
-
-```bash
-python eval/corpus_builder.py --n 200 --out eval/corpus.jsonl --seed 42
-python eval/corpus_builder_large.py
-```
-
-Both builders use a fixed seed. Identical inputs always produce identical
-output.
-
-### Step 1: SKG hit rate on the small corpus
-
-Routes every task in `eval/corpus.jsonl` through the SKG router and writes
-`eval/results/report.json` with hit rate, p50/p95 latency, and the
-estimated token-savings bar.
-
-```bash
-python -m eval.baseline_runner --corpus eval/corpus.jsonl --out eval/results
-```
-
-Paper anchor: Section 7 Tables 1 and 3, the 80% hit-rate plateau on the
-3-node corpus.
-
-### Step 2: real Baseline A on the small corpus
-
-Issues one `gpt-4o-mini` call per task with `temperature=0`, records token
-counts and latency, and writes `eval/results/baseline_a_report.json` plus
-`baseline_a_tasks.jsonl`. Costs about USD 0.02 at list pricing.
-
-```bash
-python eval/baseline_a_runner.py
-```
-
-Paper anchor: Section 7 Table 2 row A. The measured 90.32 mean input
-tokens per task is what the small-corpus blockquote in the abstract
-quotes.
-
-### Step 3: held-out 5-seed bootstrap CIs
-
-Splits the corpus 80/20 across seeds 1 through 5, runs Baseline A and the
-SKG router on each holdout, and writes per-seed records under
-`eval/results/seeded_runs/seed_{1..5}.json` plus the aggregate at
-`eval/results/seeded_aggregated.json`. The aggregate carries the
-percentile bootstrap (1000 iterations) 95% CIs from `eval/bootstrap.py`.
-
-```bash
-python -m eval.seeded_runner
-```
-
-Paper anchor: Section 7.5 statistical analysis plan.
-
-### Step 4: larger-context corpus (the H1 result)
-
-Run Baseline A on `eval/corpus_large.jsonl`, then compute the SKG estimate
-against it:
-
-```bash
-python eval/baseline_a_large.py
-python eval/skg_large_estimate.py
-```
-
-Outputs `eval/results/baseline_a_large_report.json` and
-`eval/results/skg_large_estimate.json`. The estimate uses the formula in
-Section 6.1: hits pay 120 routing-header tokens, misses pay the full
-Baseline A input mean. With an 80% hit rate that lands at 387.62 mean
-input tokens per SKG task against 1458.12 for Baseline A: 73.4% input-token
-reduction. This is the H1 result that holds at the larger-context scale.
-
-### Step 5: adversarial-corpus differential
-
-The differential between SKG (treatment T) and the declared-capability
-baseline (E) is exercised by the test suite, not a runner:
-
-```bash
-pytest tests/test_containment_matrix.py -q
-pytest tests/test_adversarial_corpus.py -q
-pytest tests/test_confused_deputy.py -q
-```
-
-Paper anchor: Section 7.4 Table 4. T contains 13/13 attacks across 3 classes;
-E contains 5/13.
-
-## Reproducing the figures
-
-Figure 1 (architecture) is a Graphviz dot source. Render the vector copy
-that ships in the paper:
-
-```bash
-dot -Tpdf figures/fig1_architecture.dot -o figures/fig1_architecture.pdf
-dot -Tsvg figures/fig1_architecture.dot -o figures/fig1_architecture.svg
-dot -Tpng figures/fig1_architecture.dot -o figures/fig1_architecture.png
-```
-
-Figures 2 through 4 come from the baseline runner. Step 1 above writes
-the PDFs to `eval/results/figures/` and the existing PNGs in `figures/`
-were taken from a prior run on the same corpus seed.
-
-| Paper figure | Source file in repo | Generated by |
-|---|---|---|
-| Figure 1 | `figures/fig1_architecture.dot` | Graphviz `dot` |
-| Figure 2 | `figures/fig1_hit_rate_cdf.png` | `eval.baseline_runner` |
-| Figure 3 | `figures/fig3_token_savings.png` | `eval.baseline_runner` |
-| Figure 4 | `figures/fig2_latency_violin.png` | `eval.baseline_runner` |
-
-## Multi-rater workflow
-
-The Cohen kappa and Krippendorff alpha numbers in Section 7.7 come from
-the rater CLI. Three steps: build the form, walk it once per rater,
-compute agreement. Full instructions and key bindings are in
-[`eval/RATING_WORKFLOW.md`](eval/RATING_WORKFLOW.md).
-
-## Test suite
-
-```bash
-pytest tests/ -q
-```
-
-209 tests at commit `622bbc8`. The Wasmtime tests skip cleanly if the
-`reviewer-ping-draft` node has not been built. Untracked work in
-progress on `main` adds extra files; the 209 number is the clean-tree
-count.
 
 ## Code layout
 
-| Directory | One-liner |
+| Path | What lives there |
 |---|---|
-| `skg/` | The system: router, policy, Wasmtime launcher, baseline runtimes, CLI. |
-| `nodes/` | Trusted Rust-to-WASI node sources (`reviewer-ping-draft`, `git-summary`, `doc-update`). |
-| `eval/` | Corpus builders, runners, rater workflow, bootstrap, seeded splits. |
-| `tests/` | 209 pytest tests covering kernel, router, runtime, host adapters, and the adversarial differential. |
-| `figures/` | Architecture diagram source plus the three rendered evaluation PNGs. |
+| `skg/`           | The package. Kernel, router, runtime, host imports, baselines. |
+| `skg/integrations/agent_proxy.py` | Drop-in helper for agent-proxy-style callers. |
+| `skg/baselines/` | The 4 baseline runtimes (declared, flow_registry, semantic_cache, flat_library). |
+| `skg/host_adapters.py` | Real adapter implementations (HTTP, git, secrets, drafts, audit). |
+| `nodes/`         | Rust crates that compile to WASI. Three reference nodes ship. |
+| `eval/`          | Corpus, runners, and statistical scripts. Outputs land under `eval/results/` (gitignored). |
+| `tests/`         | 221 pytest cases. |
+| `figures/`       | Architecture diagram source (`.dot`) and rendered PNG/SVG/PDF. |
+| `docs/`          | Reproducibility guide for the paper. |
 
-## License and citation
+## Configuration
 
-Apache 2.0. See `LICENSE`.
+SKG state lives at `~/.skg/`:
+
+- `~/.skg/skg.db` (SQLite node store)
+- `~/.skg/nodes/<node-id>/` (manifest, source, attestations per node)
+- `~/.skg/secrets/<name>` (secret files for `skg.secret_read`)
+- `~/.skg/drafts/`, `~/.skg/sent/`, `~/.skg/browser_requests/`,
+  `~/.skg/browser_writes/`, `~/.skg/production_log/` (audit
+  directories written by the host adapters)
+
+To override the root, pass `store_path=Path(...)` to `SKG(...)`
+and `wasm_path=...` to `WasmtimeRuntime.execute(...)`.
+
+## Compatibility
+
+- Python 3.13.
+- Wasmtime Python bindings 40.x (pinned in `pyproject.toml`).
+- WASI snapshot preview1 (the runtime gate's reduction argument
+  cites this version; component model migration is future work).
+
+## Paper
+
+The accompanying paper (markdown source at [`paper.md`](paper.md),
+PDF at [`paper.pdf`](paper.pdf)) describes the architecture, the
+formal cost model, the evaluation methodology, and the measurements.
+The H3 (capability-token enforcement) hypothesis is supported with
+a 13/13 vs 5/13 adversarial-corpus differential against a
+declared-capability baseline. The H1 (50% token reduction) hypothesis
+is not supported at the measured scales; SKG saves ~36% on a
+larger-context corpus, falling short of the 50% threshold.
+
+## Citation
 
 ```bibtex
 @misc{dube2026skg,
@@ -212,21 +241,11 @@ Apache 2.0. See `LICENSE`.
 }
 ```
 
-## Status notes and gotchas
+## License
 
-`eval/results/` is gitignored. Every runner above recreates what it needs.
-Do not expect the directory to exist on a fresh clone.
+Apache 2.0. See `LICENSE`.
 
-The seeded runner's reported SKG hit rate is conditional on a populated
-local node store at `~/.skg/skg.db`. On a fresh machine that store is
-empty and the routing hit rate comes back at 0%. Provision the three
-WASI nodes (build them, then add their manifests via `skg node add`)
-before relying on the hit-rate number. Baseline A measurements are
-independent of the local store.
+## Reproducibility
 
-The 73.4% token-reduction headline holds on the larger-context corpus
-(`eval/corpus_large.jsonl`, 500 to 1500 tokens of context per task), not
-on the small synthetic corpus. The crossover is the 120-token routing
-header: when per-task LLM input falls below the header cost, SKG burns
-more input tokens than LLM-only. The small corpus sits below that
-crossover by design (mean 90.32 tokens). The paper reports both regimes.
+See [`docs/paper-reproduction.md`](docs/paper-reproduction.md) for
+how to recreate the paper's measurements end-to-end.
