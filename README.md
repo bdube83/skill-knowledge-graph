@@ -1,4 +1,4 @@
-# Skill Knowledge Graph: Capability-Governed Procedure Reuse for Low-Cost LLM Agents
+# Skill Knowledge Graph: Capability-Token Enforcement for LLM-Synthesized Procedures
 
 Reproducibility guide for the SKG paper. Clone, install, run the listed
 commands, and the numbers in `paper.md` come back.
@@ -204,7 +204,7 @@ Apache 2.0. See `LICENSE`.
 
 ```bibtex
 @misc{dube2026skg,
-  title  = {Skill Knowledge Graph: Capability-Governed Procedure Reuse for Low-Cost LLM Agents},
+  title  = {Skill Knowledge Graph: Capability-Token Enforcement for LLM-Synthesized Procedures},
   author = {Dube, Bongani},
   year   = {2026},
   note   = {Paystack. Draft},

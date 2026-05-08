@@ -1,4 +1,4 @@
-# Skill Knowledge Graph: Capability-Governed Procedure Reuse for Low-Cost LLM Agents
+# Skill Knowledge Graph: Capability-Token Enforcement for LLM-Synthesized Procedures
 
 **Draft**
 **Author:** Bongani Dube
