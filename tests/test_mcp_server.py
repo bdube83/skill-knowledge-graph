@@ -320,12 +320,22 @@ def test_install_write_merges_into_claude_code(monkeypatch, capsys, tmp_path):
     assert body["mcpServers"]["skg"]["command"] == "skg-mcp"
 
 
-def test_install_chatgpt_desktop_flags_uncertain(capsys):
-    """ChatGPT Desktop install path is flagged as uncertain in stderr."""
+def test_install_codex_flags_uncertain(capsys):
+    """Codex install path prints a note explaining the TOML/CLI flow."""
     from skg import cli
 
-    rc = cli.main(["install", "--client", "chatgpt-desktop"])
+    rc = cli.main(["install", "--client", "codex"])
     assert rc == cli.EXIT_OK
     captured = capsys.readouterr()
     assert "mcpServers" in captured.out
-    assert "not stable" in captured.err or "not known" in captured.err or "note:" in captured.err
+    assert "not stable" in captured.err or "codex mcp add" in captured.err or "note:" in captured.err
+
+
+def test_install_chatgpt_desktop_no_longer_a_client():
+    """ChatGPT Desktop is dropped from KNOWN_CLIENTS; argparse rejects it."""
+    import pytest
+    from skg import cli
+
+    with pytest.raises(SystemExit):
+        cli.main(["install", "--client", "chatgpt-desktop"])
+    assert "chatgpt-desktop" not in cli.KNOWN_CLIENTS

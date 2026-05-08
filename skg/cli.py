@@ -408,41 +408,19 @@ def cmd_mcp(args: argparse.Namespace) -> int:  # noqa: ARG001
 
 KNOWN_CLIENTS = (
     "claude-code",
-    "claude-desktop",
-    "cursor",
-    "chatgpt-desktop",
     "codex",
     "copilot",
 )
 
 # Hosts whose config-file location and key layout we can write directly.
 # Hosts marked uncertain print the snippet only and leave installation to
-# the user.
+# the user. The set is scoped to the three CLI vendors agent-proxy-kit
+# routes through (config.json `vendors`: claude, codex, copilot).
 _CONFIG_TARGETS: dict[str, dict[str, Any]] = {
     "claude-code": {
         "path":   "~/.claude.json",
         "key":    "mcpServers",
         "certain": True,
-    },
-    "claude-desktop": {
-        "path":   "~/Library/Application Support/Claude/claude_desktop_config.json",
-        "key":    "mcpServers",
-        "certain": True,
-    },
-    "cursor": {
-        "path":   "~/.cursor/mcp.json",
-        "key":    "mcpServers",
-        "certain": True,
-    },
-    "chatgpt-desktop": {
-        "path":   None,
-        "key":    "mcpServers",
-        "certain": False,
-        "note":   (
-            "ChatGPT Desktop MCP config path is not stable across "
-            "versions. Paste the snippet under the host's MCP servers "
-            "list per the OpenAI docs."
-        ),
     },
     "codex": {
         "path":   None,
