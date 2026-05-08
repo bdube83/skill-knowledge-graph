@@ -1,0 +1,53 @@
+digraph SKG_Architecture {
+  graph [
+    rankdir=TB,
+    splines=ortho,
+    nodesep=0.5,
+    ranksep=0.6,
+    fontname="Helvetica",
+    label="Figure 1. SKG Architecture: capability-token enforcement at the WASM import layer",
+    labelloc=b,
+    fontsize=12
+  ];
+  node [
+    shape=box,
+    style="rounded,filled",
+    fontname="Helvetica",
+    fontsize=11,
+    margin=0.18,
+    fillcolor="#f3f6fb",
+    color="#314466"
+  ];
+  edge [
+    fontname="Helvetica",
+    fontsize=9,
+    color="#314466",
+    arrowsize=0.7
+  ];
+
+  user      [label="User request",     fillcolor="#dde6f4"];
+  norm      [label="Task normalizer"];
+  router    [label="Router\nexact, FTS, vector,\ngraph composition", fillcolor="#fff7da"];
+  candidates [label="Candidate graph"];
+  policy    [label="Policy engine\nrequested -> granted handles", fillcolor="#fff7da"];
+  runtime   [label="Dry-run executor\nWasmtime, granted handles only", fillcolor="#ffe2c7"];
+  verifier  [label="Verifier set"];
+  rejected  [label="Rejected\nmiss / ask question / synthesize learned node", fillcolor="#fde2e2"];
+  commit    [label="Commit planner"];
+  draft     [label="Draft-only output", fillcolor="#dff5e0"];
+  external  [label="External send / write\nrequires approval token", fillcolor="#dff5e0"];
+
+  user    -> norm;
+  norm    -> router;
+  router  -> candidates;
+  candidates -> policy;
+  policy  -> runtime;
+  runtime -> verifier;
+  verifier -> rejected   [label="reject"];
+  verifier -> commit     [label="accept"];
+  commit  -> draft;
+  commit  -> external    [label="approval token"];
+
+  { rank=same; rejected; commit; }
+  { rank=same; draft; external; }
+}

@@ -48,7 +48,8 @@ COST_PER_TOKEN_USD = 0.00000015
 
 # Average tokens per LLM fallback call (measured from agent-proxy-kit logs).
 # TODO [Baseline]: measure this from actual logs before publishing.
-AVG_LLM_TOKENS     = 1500
+AVG_LLM_TOKENS     = 91   # measured 90.76 on 200-task corpus, gpt-4o-mini, 2026-05-08
+                          # see eval/results/baseline_a_report.json
 
 # Average tokens per SKG header scan (router overhead).
 AVG_HEADER_TOKENS  = 120
