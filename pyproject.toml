@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "skill-knowledge-graph"
+name = "skg"
 version = "0.1.0"
-description = "Capability-governed procedure reuse for low-cost LLM agents"
+description = "Capability-token enforcement for LLM-synthesized procedures"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Bongani Dube" }]
