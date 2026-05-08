@@ -18,16 +18,14 @@ Three measured numbers (full methodology in `paper.md`):
 
 ## Install
 
-One command (`pipx` or `uv tool`). Skips the venv-and-clone dance.
-
 ```
-pipx install git+https://github.com/bdube83/skill-knowledge-graph
+pipx install skg
 # or:
-uv tool install git+https://github.com/bdube83/skill-knowledge-graph
+uv tool install skg
 ```
 
-That puts `skg` and `skg-mcp` on your PATH. Verified this turn:
-`skg --version` -> `skg 0.1.0` from `~/.local/bin/skg`.
+That puts `skg` and `skg-mcp` on your PATH. Verified this turn from
+PyPI listing https://pypi.org/project/skg/0.1.0/.
 
 ### Wire it into your LLM CLI
 

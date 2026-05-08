@@ -62,8 +62,11 @@ def _version() -> str:
     inside a fresh checkout still prints the real version.
     """
     try:
-        from importlib.metadata import version
-        return version("skill-knowledge-graph")
+        from importlib.metadata import PackageNotFoundError, version
+        try:
+            return version("skg")
+        except PackageNotFoundError:
+            return version("skill-knowledge-graph")
     except Exception:
         pass
     try:
