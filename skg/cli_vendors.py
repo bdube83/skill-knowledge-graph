@@ -174,14 +174,55 @@ def call_codex(task: str, *, model: str | None = None) -> VendorResponse:  # noq
     return VendorResponse(text=text, tokens_used=tokens, model="codex")
 
 
+# ---- Copilot (shell, gh extension) -----------------------------------------
+
+def call_copilot(task: str, *, model: str | None = None) -> VendorResponse:  # noqa: ARG001
+    """Invoke GitHub Copilot in non-interactive programmatic mode.
+
+    Uses the standalone ``copilot`` binary with the ``-p / --prompt``
+    flag (programmatic mode). The legacy ``gh copilot suggest`` flow
+    is interactive only and would block a subprocess call, so we do
+    not use it here. ``--allow-all-tools`` skips the per-tool approval
+    prompt that the binary would otherwise issue.
+
+    Authentication: relies on the Copilot CLI's existing OAuth login,
+    or a fine-grained PAT in ``GH_TOKEN`` / ``GITHUB_TOKEN`` with the
+    "Copilot Requests" permission.
+
+    Returns ERRNO_NOAVAIL when the ``copilot`` binary is absent.
+    """
+    bin_path = shutil.which("copilot")
+    if not bin_path:
+        return VendorResponse(text="", error=ERRNO_NOAVAIL, model="copilot")
+    try:
+        proc = subprocess.run(
+            [bin_path, "-p", task, "--allow-all-tools"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except subprocess.TimeoutExpired:
+        return VendorResponse(text="", error=f"{ERRNO_FAILED}: timeout", model="copilot")
+    except OSError as exc:
+        return VendorResponse(text="", error=f"{ERRNO_FAILED}: {exc}", model="copilot")
+
+    if proc.returncode != 0:
+        msg = (proc.stderr or proc.stdout or "").strip()
+        return VendorResponse(text="", error=f"{ERRNO_FAILED}: {msg[:200]}", model="copilot")
+
+    return VendorResponse(text=(proc.stdout or "").rstrip("\n"), model="copilot")
+
+
 # ---- Registry --------------------------------------------------------------
 
 VendorFn = Callable[..., VendorResponse]
 
 VENDORS: dict[str, VendorFn] = {
-    "openai": call_openai,
-    "claude": call_claude,
-    "codex":  call_codex,
+    "openai":  call_openai,
+    "claude":  call_claude,
+    "codex":   call_codex,
+    "copilot": call_copilot,
 }
 
 

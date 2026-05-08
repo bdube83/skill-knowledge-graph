@@ -17,6 +17,8 @@ Subcommands:
     skg list                          list nodes in ~/.skg/
     skg config get vendor             read the configured vendor
     skg config set vendor openai      write the configured vendor
+    skg mcp                           run the SKG MCP server over stdio
+    skg install --client <host>       print the MCP config block for a host
     skg --version                     print the package version
     skg --help                        print this help
 
@@ -383,6 +385,158 @@ def cmd_run(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+# ---- Subcommand: mcp -------------------------------------------------------
+
+def cmd_mcp(args: argparse.Namespace) -> int:  # noqa: ARG001
+    """Run the SKG MCP server over stdio.
+
+    Hosts launch this as a child process and exchange JSON-RPC frames
+    on stdin/stdout. The call blocks until the host disconnects.
+    """
+    try:
+        from skg.mcp_server import main as mcp_main
+    except ImportError as exc:
+        print(f"MCP support not installed: {exc}", file=sys.stderr)
+        print("install with: pip install 'mcp>=1.27.0'", file=sys.stderr)
+        return EXIT_BAD_ARGS
+    mcp_main()
+    return EXIT_OK
+
+
+# ---- Subcommand: install ---------------------------------------------------
+
+KNOWN_CLIENTS = (
+    "claude-code",
+    "claude-desktop",
+    "cursor",
+    "chatgpt-desktop",
+    "codex",
+)
+
+# Hosts whose config-file location and key layout we can write directly.
+# Hosts marked uncertain print the snippet only and leave installation to
+# the user.
+_CONFIG_TARGETS: dict[str, dict[str, Any]] = {
+    "claude-code": {
+        "path":   "~/.claude.json",
+        "key":    "mcpServers",
+        "certain": True,
+    },
+    "claude-desktop": {
+        "path":   "~/Library/Application Support/Claude/claude_desktop_config.json",
+        "key":    "mcpServers",
+        "certain": True,
+    },
+    "cursor": {
+        "path":   "~/.cursor/mcp.json",
+        "key":    "mcpServers",
+        "certain": True,
+    },
+    "chatgpt-desktop": {
+        "path":   None,
+        "key":    "mcpServers",
+        "certain": False,
+        "note":   (
+            "ChatGPT Desktop MCP config path is not stable across "
+            "versions. Paste the snippet under the host's MCP servers "
+            "list per the OpenAI docs."
+        ),
+    },
+    "codex": {
+        "path":   None,
+        "key":    "mcpServers",
+        "certain": False,
+        "note":   (
+            "Codex CLI MCP config path is not stable across versions. "
+            "Paste the snippet per the Codex docs."
+        ),
+    },
+}
+
+
+def _mcp_snippet(command: str | None = None) -> dict[str, Any]:
+    """Build the JSON snippet that hosts paste under mcpServers.
+
+    The default command is the ``skg-mcp`` console script. Callers can
+    override with a python invocation when the script is not on PATH.
+    """
+    cmd = command or "skg-mcp"
+    return {
+        "skg": {
+            "command": cmd,
+            "args":    [],
+        }
+    }
+
+
+def _merge_mcp_config(target: Path, key: str, snippet: dict[str, Any]) -> None:
+    """Merge the snippet into a host's JSON config under the given key.
+
+    The file is created when missing. An existing file is read, the
+    ``key`` table is merged with the snippet (snippet wins on collision),
+    and the result is written back with two-space indentation.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        try:
+            existing = json.loads(target.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            existing = {}
+    else:
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    servers = existing.get(key) or {}
+    if not isinstance(servers, dict):
+        servers = {}
+    servers.update(snippet)
+    existing[key] = servers
+    target.write_text(
+        json.dumps(existing, indent=2) + "\n", encoding="utf-8",
+    )
+
+
+def cmd_install(args: argparse.Namespace) -> int:
+    """Print (and optionally write) the MCP config block for a host."""
+    client = args.client
+    if client not in _CONFIG_TARGETS:
+        print(
+            f"client must be one of {list(KNOWN_CLIENTS)}, got {client!r}",
+            file=sys.stderr,
+        )
+        return EXIT_BAD_ARGS
+
+    target = _CONFIG_TARGETS[client]
+    snippet = _mcp_snippet(command=getattr(args, "launch_command", None))
+    block = {target["key"]: snippet}
+    print(json.dumps(block, indent=2))
+
+    if not target["certain"]:
+        note = target.get("note", "")
+        if note:
+            print(f"\nnote: {note}", file=sys.stderr)
+        if args.write:
+            print(
+                "refusing to --write: install path for this host is not "
+                "known. paste the snippet manually.",
+                file=sys.stderr,
+            )
+            return EXIT_BAD_ARGS
+        return EXIT_OK
+
+    config_path = Path(target["path"]).expanduser()
+    if args.write:
+        _merge_mcp_config(config_path, target["key"], snippet)
+        print(f"\nmerged into {config_path}", file=sys.stderr)
+    else:
+        print(
+            f"\npaste the block above into {config_path} under "
+            f"{target['key']!r}, or rerun with --write to merge it in.",
+            file=sys.stderr,
+        )
+    return EXIT_OK
+
+
 # ---- Argument parser -------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -429,6 +583,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Emit JSON.",
     )
 
+    sub.add_parser("mcp", help="Run the SKG MCP server over stdio.")
+
+    p_install = sub.add_parser(
+        "install",
+        help="Print the MCP config block for a host.",
+    )
+    p_install.add_argument(
+        "--client", choices=list(KNOWN_CLIENTS), required=True,
+        help="Target host whose MCP config layout to emit.",
+    )
+    p_install.add_argument(
+        "--write", action="store_true",
+        help="Merge the snippet into the host's config file (when known).",
+    )
+    p_install.add_argument(
+        "--launch", dest="launch_command", default=None,
+        help="Override the launch command (default: skg-mcp).",
+    )
+
     p_cfg = sub.add_parser("config", help="Read or write config.")
     cfg_sub = p_cfg.add_subparsers(dest="config_cmd", required=True)
     p_cfg_get = cfg_sub.add_parser("get", help="Print a config value.")
@@ -443,10 +616,12 @@ def _build_parser() -> argparse.ArgumentParser:
 # ---- Dispatcher ------------------------------------------------------------
 
 _DISPATCH = {
-    "init":   cmd_init,
-    "run":    cmd_run,
-    "list":   cmd_list,
-    "config": cmd_config,
+    "init":    cmd_init,
+    "run":     cmd_run,
+    "list":    cmd_list,
+    "config":  cmd_config,
+    "mcp":     cmd_mcp,
+    "install": cmd_install,
 }
 
 

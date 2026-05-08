@@ -30,6 +30,7 @@ dependencies = [
     "openai>=2.0",
     "krippendorff>=0.6",
     "numpy>=2.0",
+    "mcp>=1.27.0",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,7 @@ dev = [
 
 [project.scripts]
 skg = "skg.cli:main"
+skg-mcp = "skg.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/bdube83/skill-knowledge-graph"
