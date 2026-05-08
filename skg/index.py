@@ -54,12 +54,13 @@ def local_embed(text: str) -> list[float]:
     text-embedding-3-small) once the router slice benchmarks are complete.
     """
     digest = hashlib.sha256(text.lower().encode()).digest()  # 32 bytes
-    # Tile to EMBED_DIM floats by repeating and normalising.
-    raw = []
+    # Tile to EMBED_DIM floats by re-hashing. SHA-256 yields 32 bytes,
+    # which unpacks to 8 little-endian floats per round.
+    raw: list[float] = []
     seed = digest
     while len(raw) < EMBED_DIM:
         seed = hashlib.sha256(seed).digest()
-        raw.extend(struct.unpack("16f", seed[:64]))
+        raw.extend(struct.unpack("8f", seed[:32]))
     vec = raw[:EMBED_DIM]
     norm = (sum(v * v for v in vec) ** 0.5) or 1.0
     return [v / norm for v in vec]

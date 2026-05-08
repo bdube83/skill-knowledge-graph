@@ -48,13 +48,26 @@ differential against a declared-capability baseline.
 > routing header is larger than the average LLM-only input (90
 > tokens).
 >
-> Token cost on the larger-context corpus (200 tasks, 500-1500 token
+> Token cost on the larger-context corpus (200 tasks, 500-2825 token
 > contexts, generated via `eval/corpus_builder_large.py`): Baseline A
 > measured at 1458.12 input tokens per task mean ($0.0731 total); SKG
-> at 387.62 input tokens per task mean. SKG saves 1070.5 input tokens
-> per task on this corpus (73.4% reduction). H1 (50% input-token
-> reduction) is supported at the larger-context scale and falsified
-> at the small-task scale; the crossover is the 120-token header cost.
+> measured at 929.77 input tokens per task mean (95 hits at 120-token
+> header, 105 misses at the per-task A input). SKG saves 528 input
+> tokens per task on this corpus (~36% reduction; bootstrap 95% CI
+> [442, 628]).
+>
+> H1 verdict (corrected, 2026-05-08): the earlier 73.4% reduction
+> figure assumed an 80% hit rate extrapolated from the small corpus;
+> the actual SKG router achieves only 47.5% hit rate on the larger
+> corpus (longer task descriptions match less cleanly to the FTS
+> headers). Per-task paired one-sided t-test of T < 0.5 * A on the
+> larger corpus gives p = 0.9999 (H1 NOT supported); Cohen's d for
+> the T - A difference is -0.75 (large negative effect; SKG uses
+> fewer tokens but does not cut by half). H1 is therefore deferred
+> at all measured scales; the open empirical question is whether a
+> richer routing signal (vector + graph stages) and a node library
+> tuned to longer-context tasks can push the hit rate high enough
+> to recover the 50% threshold.
 >
 > All hits resolved at FTS stage (exact-match and vector stages not yet
 > active in this run). False-positive analysis and multi-rater review
@@ -82,13 +95,20 @@ produces different command orderings, different safety decisions, and different
 output formats across runs. There is no mechanism to compound prior successful
 work into a reusable, verifiable unit.
 
-> **Measured (Baseline A proxy, 2026-05-07):** On the 200-task synthetic corpus,
-> the direct-LLM-agent baseline (Baseline A) consumed an estimated 1,500 input
-> tokens per task = 300,000 tokens total. SKG consumed 120 tokens per hit (FTS
-> header scan) and 1,500 tokens per miss (LLM fallback). With 160/200 hits:
-> actual = 160 * 120 + 40 * 1,500 = 79,200 tokens total. Token reduction: 73.6%
-> vs Baseline A. Full per-task-class breakdown requires held-out corpus runs
-> with the complete 6-baseline comparison in Table 2.
+> **Measured (Baseline A, 2026-05-08):** On the 200-task small
+> synthetic corpus, Baseline A (gpt-4o-mini) consumed 90.32 input
+> tokens per task mean = 18,064 tokens total ($0.0183). SKG consumed
+> 120 tokens per hit (FTS routing-header) and 90.32 tokens per miss
+> (LLM fallback). With 160/200 hits, SKG total = 160 * 120 + 40 *
+> 90.32 = 22,813 tokens. SKG uses ~26% MORE input tokens than
+> Baseline A on this corpus because the routing-header cost
+> (120 tokens) exceeds the per-task LLM input. On the larger-context
+> corpus (median ~1265 input tokens per task), the SKG router gets
+> 47.5% hit rate and saves ~36% of input tokens (528/task; 95% CI
+> [442, 628]). Section 7.4 includes the paired t-test for H1; H1 is
+> not supported at either scale. The full 6-baseline comparison in
+> Table 2 shows the latency win is unambiguous across all
+> in-process systems.
 
 Repeated generation creates three compounding problems. First, it costs money
 and latency. Second, it introduces variance: the same request can produce
@@ -840,13 +860,15 @@ underlying primitive is not.
 
 > **Partial measured values (2026-05-08):** SKG "Reuses procedures"
 > measured at 80.0% on the 200-task synthetic corpus (3 active nodes).
-> Baseline E (declared-capability runtime) is implemented in
-> `skg/baselines/declared.py` and used in the adversarial-corpus
-> differential reported in Section 7.4 (T contains 13 of 13 attacks;
-> E contains 5 of 13). Baselines B (flow registry), C (semantic cache),
-> and D (flat tool library) are still pending implementation. Binary
-> Yes/No cells will be replaced with percentages after the full
-> 6-baseline runs.
+> Baselines A (LLM-only, gpt-4o-mini), B (flow registry), C (semantic
+> cache), D (flat tool library), and E (declared-capability runtime)
+> are all implemented under `skg/baselines/` (E in `declared.py`,
+> B/C/D in `flow_registry.py` / `semantic_cache.py` / `flat_library.py`).
+> A is measured at 90.32 input tokens per task mean (small corpus,
+> 1458.12 on the larger-context corpus). E is used in the adversarial
+> differential in Section 7.4 (T contains 13/13 attacks; E contains
+> 5/13). Per-system Yes/No cells will be replaced with measured
+> percentages once the B/C/D corpus runs land in Tables 2 and 3.
 
 ---
 
@@ -878,6 +900,13 @@ where:
 Consider a team workload where three task families each account for 10% of
 daily tasks (reviewer pings, design doc creation, local diagnostics), and the
 remaining 70% are novel tasks.
+
+The numbers below are illustrative parameters chosen to make the
+breakeven and reduction arithmetic readable. The actual measured
+values on the corpora used in Section 7 are: `C_llm(small) = 90`
+tokens, `C_llm(large) = 1458` tokens, `C_header = 120` tokens. The
+breakeven inequality in Section 6.3 below holds in both regimes;
+the resulting `k_be` shifts accordingly.
 
 Assumed costs:
 
@@ -1031,29 +1060,40 @@ final output. The baseline runner design is in `designs/proposed/skg-baseline-ru
 | E | | | | | | |
 | T (SKG) | | | | | | |
 
-> **Partial results, Table 2 (SKG treatment vs measured Baseline A,
-> 2026-05-08):**
+> **Table 2 measured values (small synthetic corpus, n=200, 2026-05-08):**
 >
 > | System | LLM calls/task | Input tokens/task (mean) | p50 latency ms | p95 latency ms | Hit rate |
 > |---|---:|---:|---:|---:|---:|
-> | A (LLM-only, gpt-4o-mini, measured) | 1.0 | 90.32 | 3082.49 | 8471.33 | n/a |
-> | T (SKG, measured) | 0.20 | ~114 | 0.16 | 0.16 | 80.0% |
+> | A (LLM-only, gpt-4o-mini)            | 1.00 | 90.32  | 3082.49 | 8471.33 | n/a   |
+> | B (flow registry, exact match)       | 0.96 | 91.20  | 0.00    | 0.00    | 4.0%  |
+> | C (semantic cache, fnv-hash 64-dim)  | 0.12 | 116.40 | 0.04    | 0.06    | 88.0% |
+> | D (flat tool library, name match)    | 0.84 | 94.80  | 0.00    | 0.80    | 16.0% |
+> | T (SKG, FTS routing)                 | 0.20 | 114.00 | 0.16    | 0.16    | 80.0% |
 >
-> Token calculation for T uses the measured per-miss LLM cost:
-> `(160 hits * 120 tokens + 40 misses * 90.32 tokens) / 200 = 114.06 tokens/task mean`.
-> SKG uses ~26% more input tokens than LLM-only on this corpus because
-> the routing-header cost (120 tokens) exceeds the per-task LLM input
-> for these short task descriptions. The token-reduction crossover
-> happens when per-task LLM input exceeds the routing-header cost; this
-> synthetic corpus does not exercise that regime.
+> Numbers from `eval/results/baseline_a_report.json`,
+> `baseline_b_report.json`, `baseline_c_report.json`,
+> `baseline_d_report.json`, and the held-out aggregate
+> `seeded_aggregated.json`.
 >
-> Baseline A latency (3082 ms p50) reflects real network round-trips
-> to OpenAI; SKG latency (0.16 ms p50) is local-only routing. SKG's
-> latency win is unambiguous on this corpus.
+> Caveats:
+> - C's hit rate (88%) is inflated by a coarse 64-dim fnv-hash
+>   embedding plus the runtime's miss-then-cache behaviour; later
+>   near-duplicate tasks hit on previously seen misses. Documented
+>   in `skg/baselines/semantic_cache.py`. A real semantic cache with
+>   a learned embedding would behave differently.
+> - B's hit rate (4%) is keyword-exact matching against 3 seed
+>   pairs; trivial.
+> - D's hit rate (16%) uses the same keyword heuristic but
+>   actually executes a .wasm artifact for the 32 hits.
+> - SKG's 80% hit rate is the FTS stage on three nodes against this
+>   small corpus. The held-out 5-seed bootstrap 95% CI is
+>   [78.5%, 83.5%] (`eval/results/seeded_aggregated.json`).
 >
-> Baselines B (flow registry), C (semantic cache), D (flat tool
-> library), E (declared-capability) are implemented but not yet run
-> on the corpus. Bootstrap CIs (n=1000) pending held-out runs.
+> On the small corpus none of the in-process systems (T, B, C, D)
+> save tokens vs LLM-only because the per-task LLM input (90 tokens)
+> is below the SKG routing-header cost (120 tokens). The latency
+> story is unambiguous: every in-process system is over four orders
+> of magnitude faster than the network round-trip to OpenAI.
 
 **Routing metrics (Table 3):**
 
@@ -1069,7 +1109,14 @@ final output. The baseline runner design is in `designs/proposed/skg-baseline-ru
 > | T (SKG, 3 nodes) | 0 | 160 (80.0%) | 0 | 0 | 40 (20.0%) | pending human review |
 > | D (flat lib) | n/a | n/a | n/a | n/a | n/a | pending implementation |
 >
-> Vector stage not active in this run (Qdrant local instance not started).
+> Vector stage measured (Qdrant in-memory, 2026-05-08):
+> 0/200 hits at TAU=0.88; p95 top similarity score 0.0099;
+> embedding_dim=128 (`local-hash-v1`). Cause: the hash-projection
+> embedding has no semantic structure, so distinct task strings
+> produce near-orthogonal vectors. The router pipeline is wired
+> correctly (an exact-header-match query returns score 1.0). Replacing
+> `local-hash-v1` with a learned embedding is a follow-up paper item
+> (Section 7.8). See `eval/results/vector_stage_report.json`.
 > False-route rate requires human reviewer labels on at least 20% held-out sample.
 > Inter-rater kappa target: > 0.7.
 
@@ -1208,28 +1255,33 @@ Total skg test count after Phase 3e: 159 passed.
 | H3: Handle enforcement blocks ungranted effects | Ungranted attempts that reach external system | T = 0 | Exact test (any failure falsifies). Preliminary: 13/13 adversarial modules contained by T, 5/13 by E, 2026-05-08 |
 | H4: Novel tasks are slower than direct LLM | Latency (novel subset) | T > A | Report as negative result, no threshold. Measured 2026-05-08: T = 0.16 ms p50; A = 3082 ms p50 (gpt-4o-mini). T is faster, not slower; the hypothesis as stated is falsified at this corpus scale |
 
-H1 (SKG cuts input tokens by 50%+ for recurring tasks) is supported
-at larger-context scale and falsified at the small-task scale. The
-crossover is the 120-token routing-header cost.
+H1 (SKG cuts input tokens by 50%+ for recurring tasks) is NOT
+supported at either measured scale. SKG does save tokens on
+larger-context corpora; it just does not save by half. The driver
+is the SKG router's hit rate, not the per-call cost.
 
 - Small corpus (`eval/corpus.jsonl`, 200 tasks, ~90 input tokens
   each): Baseline A measured at 90.32 tokens/task mean; SKG at 114
   tokens/task mean (held-out 5-seed CI [113.77, 115.22]). SKG uses
-  ~26% MORE input tokens than Baseline A. H1 falsified at this scale.
+  ~26% MORE input tokens than Baseline A. H1 falsified at this scale
+  because the 120-token routing header exceeds the per-task LLM
+  input.
 - Larger corpus (`eval/corpus_large.jsonl`, 200 tasks, 500-2825
   tokens per task, median ~1265): Baseline A measured at 1458.12
-  tokens/task mean; SKG at 387.62 tokens/task mean. SKG saves 1070.5
-  tokens/task (73.42% reduction). H1 supported at this scale
-  (`T < 0.50 * A` holds; T = 0.266 * A).
+  tokens/task mean; SKG measured at 929.77 tokens/task mean (95
+  hits at 120-token header, 105 misses at the per-task A input).
+  SKG saves 528 tokens/task (~36% reduction; bootstrap 95% CI
+  [442, 628]). One-sided paired t-test for H1 (T < 0.5 * A) gives
+  p = 0.9999, df = 199; Cohen's d on T - A is -0.75. H1 not
+  supported at this scale either.
 
-The breakeven is at exactly the routing header cost: when the
-LLM-only call uses fewer than 120 input tokens, the header is the
-dominant cost and SKG loses; when the LLM-only call exceeds 120
-tokens, the header amortises and SKG wins by an amount proportional
-to the hit rate. Real agent task contexts exceed 120 tokens by
-construction, so the larger-context result is the operationally
-relevant one; the small-corpus result reveals the corpus-design
-artefact rather than a flaw in the SKG approach.
+The driver is the SKG router's hit rate. On the small corpus the
+router achieves 80% hits; on the larger corpus only 47.5%. Longer
+task descriptions match less cleanly to the FTS-stage headers used
+by the current router. Recovering H1 at scale requires either a
+richer routing signal (vector + graph stages active, currently
+dormant) or a node library tuned to longer-context tasks. Both are
+named in the follow-up paper agenda in Section 7.8.
 
 H2 (graph composition vs flat tool library) is also deferred to the
 follow-up paper. At this scale (3 active nodes, all non-composable),
@@ -1274,9 +1326,14 @@ per-task LLM input.
 
 On the larger-context corpus (`eval/corpus_large.jsonl`, 200 tasks,
 median ~1265 input tokens per task): Baseline A measured at
-291,624 input tokens total ($0.0731); SKG estimated at 77,524 input
-tokens total (160 hits at 120-token header + 40 misses at 1458.12
-measured tokens). SKG saves 214,100 input tokens (73.42% reduction).
+291,624 input tokens total ($0.0731); SKG measured at 185,954
+input tokens total (95 hits at 120-token header + 105 misses at
+each task's measured A input). SKG saves 105,670 input tokens
+total (~36% aggregate reduction; 528 tokens/task; 95% bootstrap
+CI [442, 628]). The earlier 73% headline was an estimate that
+assumed an 80% hit rate; the SKG router actually achieves 47.5%
+hit rate on this corpus (95/200), so the realised saving is
+~36%.
 
 The breakeven point is exactly the 120-token routing header cost.
 At per-task LLM input below 120 tokens, the header dominates and
@@ -1710,5 +1767,5 @@ short checklist for paper reproduction.
 > - [x] Step 6: Three core figures generated at `eval/results/figures/`
 > - [~] Step 7: TODO blocks replaced (Section 3.9 reduction argument added; Figure 1 ASCII architecture in place; Figures 2-4 embedded; Figures 5-6 still status notes pending Baselines A/B/C/D)
 > - [x] Step 8: `bin/kit-test --full` passes (88/88 kit tests, 159/159 SKG tests as of 2026-05-08)
-> Corpus git SHA: `5b37877` (bdube83/skill-knowledge-graph). Kit SHA: see commits on `agent-proxy-kit`.
+> Corpus git SHA: `622bbc8` on `main` of `bdube83/skill-knowledge-graph` (verified 2026-05-08; see https://github.com/bdube83/skill-knowledge-graph/commit/622bbc8). Kit SHA: see commits on `agent-proxy-kit`, kept private.
 
