@@ -18,41 +18,51 @@ Three measured numbers (full methodology in `paper.md`):
 
 ## Install
 
-Two surfaces, pick whichever fits your workflow.
-
-### As an MCP server
-
-The recommended path. Plugs into Claude Code, Codex CLI, and Copilot
-CLI. The kit's chat UI uses the same server.
+One command (`pipx` or `uv tool`). Skips the venv-and-clone dance.
 
 ```
-git clone https://github.com/bdube83/skill-knowledge-graph.git
-cd skill-knowledge-graph
-python3.13 -m venv .venv
-.venv/bin/pip install -e .
+pipx install git+https://github.com/bdube83/skill-knowledge-graph
+# or:
+uv tool install git+https://github.com/bdube83/skill-knowledge-graph
+```
 
-.venv/bin/skg install --client claude-code --write   # writes ~/.claude.json
-.venv/bin/skg install --client copilot --write       # writes ~/.copilot/mcp-config.json
+That puts `skg` and `skg-mcp` on your PATH. Verified this turn:
+`skg --version` -> `skg 0.1.0` from `~/.local/bin/skg`.
 
-# Codex stores MCP servers in TOML; use its own command:
-codex mcp add skg -- $(pwd)/.venv/bin/skg-mcp
+### Wire it into your LLM CLI
+
+```
+skg install --client claude-code --write     # writes ~/.claude.json
+skg install --client copilot --write         # writes ~/.copilot/mcp-config.json
+codex mcp add skg -- $(which skg-mcp)        # codex uses TOML, registers via its own CLI
 ```
 
 The hosts now expose three tools: `skg_route`, `skg_execute`,
 `skg_list_nodes`.
 
-### As a standalone CLI
+### Or use it as a CLI directly
 
 For scripts, CI, and one-off use without an MCP host.
 
 ```
-.venv/bin/skg run "draft a reviewer ping for PR review"
-.venv/bin/skg run --vendor copilot "summarise the last 10 commits"
-.venv/bin/skg run --json --dry-run "any task"
+skg run "draft a reviewer ping for PR review"
+skg run --vendor copilot "summarise the last 10 commits"
+skg run --json --dry-run "any task"
 ```
 
-The CLI routes through SKG, falls back to the configured vendor
-(default openai) on a miss, and prints the result.
+`skg run` routes through SKG, falls back to the configured vendor
+on a miss, and prints the result.
+
+### For development
+
+When you want to edit the package itself:
+
+```
+git clone https://github.com/bdube83/skill-knowledge-graph
+cd skill-knowledge-graph
+python3.13 -m venv .venv
+.venv/bin/pip install -e .
+```
 
 ## What you get
 
