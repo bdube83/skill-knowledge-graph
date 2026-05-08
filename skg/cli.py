@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -454,13 +455,33 @@ _CONFIG_TARGETS: dict[str, dict[str, Any]] = {
 }
 
 
+def _resolve_skg_mcp() -> str:
+    """Return the absolute path to ``skg-mcp``, falling back to bare name.
+
+    Looks first in the running interpreter's bin directory (so a fresh
+    `pip install -e .` puts the script in a known place even when the
+    venv is not activated), then on PATH. If neither resolves, returns
+    the bare ``skg-mcp`` so the snippet still parses; the host will
+    fail at connect-time with a clear message rather than silently.
+    """
+    here = Path(sys.executable).parent / "skg-mcp"
+    if here.is_file():
+        return str(here)
+    found = shutil.which("skg-mcp")
+    if found:
+        return found
+    return "skg-mcp"
+
+
 def _mcp_snippet(command: str | None = None) -> dict[str, Any]:
     """Build the JSON snippet that hosts paste under mcpServers.
 
-    The default command is the ``skg-mcp`` console script. Callers can
-    override with a python invocation when the script is not on PATH.
+    Defaults to the absolute path of ``skg-mcp`` resolved against the
+    running interpreter. This avoids the common foot-gun where a host
+    process (Claude Code, Cursor, etc.) cannot find ``skg-mcp`` on its
+    own PATH because the binary lives inside a venv.
     """
-    cmd = command or "skg-mcp"
+    cmd = command or _resolve_skg_mcp()
     return {
         "skg": {
             "command": cmd,
