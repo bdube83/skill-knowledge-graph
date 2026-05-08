@@ -1,36 +1,28 @@
-# Skill Knowledge Graph
+# 🛡️ Skill Knowledge Graph
 
-Capability-token enforcement at the WASM import layer for
-LLM-synthesized procedures. SKG sits between an LLM agent and the
-operations it wants to perform, so the runtime, not the manifest,
-decides what each call may do.
+> Capability-token enforcement for LLM-synthesized code.
+> The runtime is the gate, not the manifest.
 
-This README is the integration guide. The accompanying paper at
-[`paper.md`](paper.md) covers the design, evaluation methodology,
-and measurements; the reproducibility steps for those measurements
-live at [`docs/paper-reproduction.md`](docs/paper-reproduction.md).
+![Python](https://img.shields.io/badge/python-3.13%2B-blue)
+![Tests](https://img.shields.io/badge/tests-221%20passing-green)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
+![Status](https://img.shields.io/badge/status-research%20preview-orange)
 
-## Why use SKG
+When an LLM agent runs code, the manifest tells you what the code
+is *supposed* to do. SKG makes the WASM runtime physically prevent
+anything else, on every call, with per-run capability tokens.
 
-- You want an LLM agent to call host functions (HTTP, git, local
-  files, secrets, external messages) under capability-token
-  enforcement instead of trust-the-manifest semantics.
-- You want a routing layer that picks a verified Rust-to-WASI
-  procedure for known task families before falling back to the
-  LLM, so recurring work runs faster and (above ~120 input tokens
-  per task) cheaper.
-- You want every external operation a node performs to be auditable
-  via append-only attestation files under `~/.skg/`.
+![Containment differential](figures/marketing_attack_containment.png)
 
-If your agent always falls back to the LLM, SKG adds latency without
-saving tokens. The break-even per-task LLM input is the routing
-header cost, ~120 tokens. See `paper.md` Section 7.4 for measured
-numbers.
+> Adversarial-corpus differential: **SKG contains 13 / 13 attacks**
+> across manifest-lies, path-escape, and WASI-introspection classes.
+> A declared-capability baseline (manifest checked once at load,
+> trusted at runtime) contains 5 / 13. Reproduce with
+> `pytest tests/test_containment_matrix.py -q`.
 
-## Install
+---
 
-Python 3.13 is required (the package targets it; `pyproject.toml`
-classifiers).
+## ⚡ 60-second install
 
 ```bash
 git clone https://github.com/bdube83/skill-knowledge-graph.git
@@ -39,16 +31,11 @@ python3.13 -m venv .venv
 .venv/bin/pip install -e .
 ```
 
-Optional but useful at integration time: an OpenAI key (or another
-LLM key your code uses) at `~/.agent-proxy/openai-key`. SKG itself
-does not call an LLM; the integration helper at
-`skg.integrations.agent_proxy` calls one only on a miss when the
-caller passes `synthesize_on_miss=True`.
+That is it. No daemon, no Docker, no API key required to start.
 
-## Quick start
+## 🚀 30-second example
 
-The simplest integration: route a task through SKG, prepend the
-routing summary to your prompt, fall back to your LLM on a miss.
+Route a task through SKG and use the result in your existing agent:
 
 ```python
 from skg.integrations.agent_proxy import route_proposal, build_prompt_prefix
@@ -56,180 +43,134 @@ from skg.integrations.agent_proxy import route_proposal, build_prompt_prefix
 result = route_proposal("Draft a reviewer ping for PR review")
 
 if result.hit:
-    prefix = build_prompt_prefix(result)
-    prompt = prefix + "\n" + your_existing_prompt
+    prompt = build_prompt_prefix(result) + "\n" + your_existing_prompt
     response = your_llm.chat(prompt)
 else:
     response = your_llm.chat(your_existing_prompt)
 ```
 
-`RouteResult` carries `hit`, `node`, `stage`, `grant`. On a miss
-the caller falls through; on a hit you can either use the node's
-header as a prompt prefix (above) or execute the WASM artifact
-directly (below).
+`result.hit` is true when SKG knows a verified procedure for this
+task. Otherwise your code falls through; SKG never blocks.
 
-## Direct execution under capability-token enforcement
+For direct-execution-with-grants:
 
 ```python
-from pathlib import Path
 from skg.wasmtime_launcher import WasmtimeRuntime
-
 rt = WasmtimeRuntime()
-result = rt.execute(
-    wasm_path=Path("nodes/reviewer-ping-draft/target/wasm32-wasip1/release/reviewer_ping_draft.wasm"),
-    node_id="reviewer-ping-draft",
-    task="draft reviewer ping",
-    context={"pr_number": 42, "repo": "x/y", "author": "alice", "reviewers": ["bob"]},
-    granted_effects=["text.generate"],
+out = rt.execute(
+    wasm_path        = "nodes/reviewer-ping-draft/target/wasm32-wasip1/release/reviewer_ping_draft.wasm",
+    node_id          = "reviewer-ping-draft",
+    task             = "draft a ping",
+    context          = {"pr_number": 42, "reviewers": ["bob"]},
+    granted_effects  = ["text.generate"],
 )
-print(result.success, result.output, result.observed_effects)
+print(out.success, out.output)
 ```
 
-The runtime wires only the WASI and `skg.*` host imports the grant
-set permits. A node that imports a host function it was not granted
-fails at instantiate-time, not at call-time. See `skg/cap_to_imports.py`
-for the effect-to-import mapping and `skg/host_imports.py` for the
-per-call grant validation.
+A node that imports a host function it was not granted **fails at
+instantiate-time, not at call-time**. The linker simply does not
+have the import.
 
-## Effect classes
+---
 
-The kernel understands twelve generic effect classes plus
-`text.generate`. They live in `skg/effects.py`:
+## 🤔 Why use SKG
 
-```
-local.read   local.write
-network.read network.write
-external.draft external.send (approval-gated)
-browser.read browser.write
-git.read     git.write     (approval-gated)
-secret.read
-production.write           (approval-gated)
-text.generate
-```
+You are running an LLM agent that calls real code. Three things
+go wrong without enforcement:
 
-Approval-gated effects require a non-zero approval token at call
-time (`skg/cap_to_imports.py:APPROVAL_HOST`). The runtime returns
-`ERRNO_DENIED` (13) when the token is zero.
+| Problem | What happens | What SKG does |
+|---|---|---|
+| 🪤 **Manifest lies** | LLM-synthesized node declares `text.generate` only, but the source actually opens a network socket. | Linker has no `network` import; instantiation fails. |
+| 🐍 **Confused deputy** | A benign node accepts attacker-controlled input that contains a URL outside its grant. | Per-call wrapper validates the URL pattern; out-of-scope returns `ERRNO_DENIED` (13). |
+| 🔓 **Path escape** | Node has `local.read` for `/workspace`, tries `path_open("/etc/passwd")`. | Path scope is enforced at every WASI call; out-of-scope returns `ERRNO_NOENT` (44). |
 
-## Adding a new node
+Every external operation a node performs lands in an append-only
+audit log under `~/.skg/`. Drafts, sent messages, browser actions,
+production writes, and git ops each get their own audit directory.
 
-A node is a Rust crate compiled to WASI plus a manifest and a header.
-Skeleton:
+---
 
-```
-nodes/<node-id>/
-  Cargo.toml
-  manifest.yaml         # task_type, header, tags, requested_capabilities
-  src/main.rs           # reads task+context+grants from stdin, writes JSON to stdout
-```
+## 🧱 What is in the box
 
-The three reference nodes under `nodes/` (reviewer-ping-draft,
-git-summary, doc-update) are the working templates. Build with:
+- 🛂 **GrantedLinker:** per-run Wasmtime linker that wires only the imports the grant set permits. No `define_wasi()` blanket; no manifest-trusted host surface.
+- 📜 **12 + 1 effect classes:** `local.read/write`, `network.read/write`, `external.draft/send`, `browser.read/write`, `git.read/write`, `secret.read`, `production.write`, `text.generate`. Three of them are approval-gated.
+- 🧭 **4-stage router:** exact, FTS, vector, graph composition. Picks a verified procedure before falling back to the LLM.
+- ✅ **6-gate promotion:** hash, unit tests, replay tests, dry-run attestation, observed-effects-subset-of-granted-caps, human approval. New nodes are CANDIDATE until they pass all six.
+- 🧰 **10 real host adapters:** HTTP via urllib, git via subprocess (read whitelist + write whitelist), secrets via `~/.skg/secrets/`, drafts/sends/browser-queues/production-log via append-only audit dirs.
+- 📚 **5 baseline runtimes:** SKG itself, declared-capability, flow-registry, semantic-cache, flat-tool-library, plus a real LLM-only runner. Drop any one into the same `execute(...)` interface.
 
-```bash
-cd nodes/<node-id>
-cargo build --release --target wasm32-wasip1
-```
+---
 
-The .wasm artifact lands at
-`nodes/<node-id>/target/wasm32-wasip1/release/<node>.wasm`. Place
-the manifest at `~/.skg/nodes/<node-id>/manifest.yaml` (or pass
-`store_path` to `SKG()` to use a different root) and call
-`skg.add_node(...)`.
+## 🆚 Compared to your alternatives
 
-## Routing pipeline
+| | LLM-only | Declared-cap | Flat tool lib | **SKG** |
+|---|:---:|:---:|:---:|:---:|
+| Per-call gate at host imports | ❌ | ❌ | ❌ | ✅ |
+| Unforgeable run-scoped handles | ❌ | ❌ | ❌ | ✅ |
+| Dry-run before promotion | ❌ | ❌ | ❌ | ✅ |
+| Append-only attestation chain | ❌ | ❌ | ❌ | ✅ |
+| Routes around the LLM on hits | ❌ | ❌ | partial | ✅ |
+| Recovers from compromised LLM synthesis | ❌ | ❌ | ❌ | ✅ |
 
-The router's four stages are `exact`, `fts`, `vector`, and
-`graph composition` (`skg/router.py`). On a miss the router
-returns `RouteResult(hit=False, ...)`; the caller decides whether
-to fall back to an LLM or to ask the user.
+The adversarial-corpus differential at the top of this README is
+exactly this comparison, measured.
 
-```python
-from skg.graph import SKG
+---
 
-skg = SKG()
-result = skg.route("Draft a reviewer ping", {"pr_number": 1})
-print(result.hit, result.stage, result.node and result.node.id)
-```
+## 🏗️ Architecture
 
-## Manifest scopes (Phase 3d)
+![Architecture](figures/fig1_architecture.png)
 
-Per-effect URL patterns and path scopes go in the manifest under
-`requested_capabilities`. The launcher reads them when you pass
-`manifest_path=` to `execute(...)`:
+User request flows through the task normalizer, then the 4-stage
+router, then the policy engine that mints unforgeable handles, then
+Wasmtime under those handles only, then the verifier set, then the
+commit planner. Vector source: `figures/fig1_architecture.svg` (and
+`.dot`, `.pdf`).
 
-```yaml
-requested_capabilities:
-  - effect:        network.read
-    url_pattern:   "https://api.allowed.example/*"
-  - effect:        local.read
-    path_scope:    "/workspace/data"
-```
+---
 
-When `manifest_path` is omitted the launcher mints wildcard
-scopes for backward compatibility.
+## 🔬 What is honestly NOT supported yet
 
-## Adversarial test surface
+- ⏳ **50% token reduction.** SKG saves ~36% input tokens on a
+  larger-context corpus (200 tasks, median ~1265 tokens each); on
+  short-task corpora it costs ~26% more because the 120-token
+  routing header dominates. Verified by paired one-sided t-test
+  (`p = 0.9999`, `Cohen's d = -0.75`) in `paper.md` Section 7.4.
+- ⏳ **Vector-stage routing.** Currently 0 / 200 hits. The pipeline
+  is correct (an exact-header match returns 1.0); the bottleneck is
+  the placeholder `local-hash-v1` embedding, not Qdrant. Replacing
+  it with a learned embedding is on the roadmap.
+- ⏳ **Graph composition empirics.** Quantitative T-vs-flat-library
+  tests need composable node pairs; deferred to a follow-up paper.
 
-`tests/test_security.py`, `tests/test_containment_matrix.py`,
-`tests/test_scoped_enforcement.py`, `tests/test_confused_deputy.py`,
-and `tests/test_local_wasi.py` together exercise four attack
-classes (manifest lies, path escape, WASI introspection, confused
-deputy) end-to-end through real WASM execution. Use them as the
-contract specification for the runtime gate.
+We tell you what works *and* what doesn't, with measurements. See
+[`paper.md`](paper.md) for the full evaluation methodology.
 
-```bash
-.venv/bin/python -m pytest tests/ -q
-# 221 tests as of commit fa0644c
-```
+---
 
-## Code layout
+## 📦 Where to go next
 
-| Path | What lives there |
-|---|---|
-| `skg/`           | The package. Kernel, router, runtime, host imports, baselines. |
-| `skg/integrations/agent_proxy.py` | Drop-in helper for agent-proxy-style callers. |
-| `skg/baselines/` | The 4 baseline runtimes (declared, flow_registry, semantic_cache, flat_library). |
-| `skg/host_adapters.py` | Real adapter implementations (HTTP, git, secrets, drafts, audit). |
-| `nodes/`         | Rust crates that compile to WASI. Three reference nodes ship. |
-| `eval/`          | Corpus, runners, and statistical scripts. Outputs land under `eval/results/` (gitignored). |
-| `tests/`         | 221 pytest cases. |
-| `figures/`       | Architecture diagram source (`.dot`) and rendered PNG/SVG/PDF. |
-| `docs/`          | Reproducibility guide for the paper. |
+- [`docs/integration.md`](docs/integration.md): longer integration guide. Effect classes, manifest schema, adding a node, manifest-declared scopes (Phase 3d), the adversarial test surface.
+- [`paper.md`](paper.md) / [`paper.pdf`](paper.pdf): the research paper.
+- [`docs/paper-reproduction.md`](docs/paper-reproduction.md): how to recreate the paper's measurements end-to-end.
+- [`eval/RATING_WORKFLOW.md`](eval/RATING_WORKFLOW.md): multi-rater workflow for routing precision (Cohen kappa, Krippendorff alpha).
 
-## Configuration
+---
 
-SKG state lives at `~/.skg/`:
+## 🤝 Contributing
 
-- `~/.skg/skg.db` (SQLite node store)
-- `~/.skg/nodes/<node-id>/` (manifest, source, attestations per node)
-- `~/.skg/secrets/<name>` (secret files for `skg.secret_read`)
-- `~/.skg/drafts/`, `~/.skg/sent/`, `~/.skg/browser_requests/`,
-  `~/.skg/browser_writes/`, `~/.skg/production_log/` (audit
-  directories written by the host adapters)
+The repo is a research preview. Issues and PRs are welcome,
+especially for:
+- Real-world adapters (Slack, GitHub Comments, Linear) on top of `skg.host_adapters`.
+- A learned embedding to replace `local-hash-v1` in `skg/index.py`.
+- Composable nodes to test graph-composition empirically.
+- Multi-rater labels to populate the routing-precision form (`eval/rating_runner.py`).
 
-To override the root, pass `store_path=Path(...)` to `SKG(...)`
-and `wasm_path=...` to `WasmtimeRuntime.execute(...)`.
+Run `pytest tests/ -q` before opening a PR; 221 tests as of `1385cbc`.
 
-## Compatibility
+---
 
-- Python 3.13.
-- Wasmtime Python bindings 40.x (pinned in `pyproject.toml`).
-- WASI snapshot preview1 (the runtime gate's reduction argument
-  cites this version; component model migration is future work).
-
-## Paper
-
-The accompanying paper (markdown source at [`paper.md`](paper.md),
-PDF at [`paper.pdf`](paper.pdf)) describes the architecture, the
-formal cost model, the evaluation methodology, and the measurements.
-The H3 (capability-token enforcement) hypothesis is supported with
-a 13/13 vs 5/13 adversarial-corpus differential against a
-declared-capability baseline. The H1 (50% token reduction) hypothesis
-is not supported at the measured scales; SKG saves ~36% on a
-larger-context corpus, falling short of the 50% threshold.
-
-## Citation
+## 📚 Citation
 
 ```bibtex
 @misc{dube2026skg,
@@ -241,11 +182,6 @@ larger-context corpus, falling short of the 50% threshold.
 }
 ```
 
-## License
+## 📄 License
 
-Apache 2.0. See `LICENSE`.
-
-## Reproducibility
-
-See [`docs/paper-reproduction.md`](docs/paper-reproduction.md) for
-how to recreate the paper's measurements end-to-end.
+Apache 2.0. See [`LICENSE`](LICENSE).
