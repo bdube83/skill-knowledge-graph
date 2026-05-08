@@ -3,14 +3,16 @@
 > Capability-token enforcement for LLM-synthesized procedures.
 > The runtime is the gate, not the manifest.
 
-![Hero](figures/hero.png)
+![Hero](https://raw.githubusercontent.com/bdube83/skill-knowledge-graph/main/figures/hero.png)
 
 SKG sits between an LLM agent and the operations it wants to perform.
 On every host call, the Wasmtime runtime physically prevents anything
 the grant set does not include. Recurring tasks resolve through a
 local router and skip the LLM entirely.
 
-Three measured numbers (full methodology in `paper.md`):
+Three measured numbers (full methodology in
+[`paper.md`](https://github.com/bdube83/skill-knowledge-graph/blob/main/paper.md)
+or [`paper.pdf`](https://github.com/bdube83/skill-knowledge-graph/blob/main/paper.pdf)):
 
 - 528 input tokens saved per task (~36%) on a 200-task corpus, 95% bootstrap CI [442, 628].
 - 0.16 ms p50 routing latency vs 3082 ms p50 for the LLM call.
@@ -108,7 +110,7 @@ expands typed edges in the graph.
 | `tests/`         | Pytest suite. |
 | `figures/`       | Architecture diagram source and renders. |
 | `docs/`          | Integration guide and paper-reproduction guide. |
-| `paper.md` / `paper.pdf` | The accompanying paper. |
+| [`paper.md`](https://github.com/bdube83/skill-knowledge-graph/blob/main/paper.md) / [`paper.pdf`](https://github.com/bdube83/skill-knowledge-graph/blob/main/paper.pdf) | The accompanying paper. |
 
 ## Citation
 
@@ -124,4 +126,4 @@ expands typed edges in the graph.
 
 ## License
 
-Apache 2.0. See [`LICENSE`](LICENSE).
+Apache 2.0. See [`LICENSE`](https://github.com/bdube83/skill-knowledge-graph/blob/main/LICENSE).
