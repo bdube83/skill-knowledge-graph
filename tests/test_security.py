@@ -80,14 +80,13 @@ def test_ungranted_wasi_path_open_fails_at_instantiate(tmp_path: Path) -> None:
     assert result.success is False
 
 
-def test_local_read_grant_returns_unsupported_error(tmp_path: Path) -> None:
-    """Until LOCAL_READ WASI imports are implemented, granting it is a clean error."""
+def test_local_read_grant_no_longer_unsupported(tmp_path: Path) -> None:
+    """LOCAL_READ WASI imports are wired now; granting it instantiates."""
     wat = _wat_with_import(WASI_MODULE, "fd_write", "i32 i32 i32 i32", "i32")
     wasm = _compile_to_disk(wat, tmp_path, "needs_local_read")
     result = _try_run(wasm, granted_effects=["local.read"])
-    assert result.success is False
-    assert "unsupported wasi imports" in result.error.lower() \
-        or "path_open" in result.error.lower()
+    assert result.success is True, f"expected success, got error: {result.error}"
+    assert "unsupported wasi imports" not in result.error.lower()
 
 
 def test_granted_skg_http_get_instantiates(tmp_path: Path) -> None:

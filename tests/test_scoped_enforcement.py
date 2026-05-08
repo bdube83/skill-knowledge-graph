@@ -23,8 +23,25 @@ from pathlib import Path
 
 import pytest
 
+from skg import host_adapters
 from skg.effects import Effect
 from skg.wasmtime_launcher import WasmtimeRuntime
+
+
+@pytest.fixture(autouse=True)
+def _stub_real_adapters(monkeypatch):
+    """Replace real HTTP adapters with stubs for these tests.
+
+    The scope-enforcement tests assert that the wrapper validates URLs
+    against the handle scope. They do not care what the adapter does
+    after validation, so we replace real urllib calls with stubs that
+    return ERRNO_SUCCESS plus a small JSON body.
+    """
+    def _stub(_payload):
+        return host_adapters.ERRNO_SUCCESS, b'{"stub":true}'
+
+    fake = {key: _stub for key in host_adapters.ADAPTERS}
+    monkeypatch.setattr(host_adapters, "ADAPTERS", fake)
 
 
 class _ScopedRuntime(WasmtimeRuntime):

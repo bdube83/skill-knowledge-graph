@@ -25,6 +25,7 @@ MINIMUM_WASI: frozenset[str] = frozenset({
     "proc_exit",
     "fd_read",
     "fd_write",
+    "fd_close",
     "environ_get",
     "environ_sizes_get",
     "random_get",

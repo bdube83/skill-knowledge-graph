@@ -3,6 +3,7 @@ header: Summarise recent git commits for a repository branch.
 requested_capabilities:
   - effect: git.read
     adapter: local
+    path_scope: "/"
 forbidden_capabilities: []
 preconditions: []
 verifiers:

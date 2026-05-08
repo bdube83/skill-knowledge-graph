@@ -31,16 +31,29 @@ class EdgeType(str, Enum):
 
 @dataclass
 class CapabilityRequest:
-    effect:  str            # one of the 12 Effect classes (string value)
-    adapter: str            # adapter name, e.g. "github", "gmail"
-    scope:   dict[str, Any] = field(default_factory=dict)
+    effect:       str                    # one of the 12 Effect classes (string value)
+    adapter:      str                    # adapter name, e.g. "github", "gmail"
+    scope:        dict[str, Any] = field(default_factory=dict)
+    url_pattern:  str | None     = None  # fnmatch glob applied to URLs at handle-mint time
+    path_scope:   str | None     = None  # filesystem prefix applied to paths at handle-mint time
 
     def to_dict(self) -> dict:
-        return {"effect": self.effect, "adapter": self.adapter, "scope": self.scope}
+        d: dict[str, Any] = {"effect": self.effect, "adapter": self.adapter, "scope": self.scope}
+        if self.url_pattern is not None:
+            d["url_pattern"] = self.url_pattern
+        if self.path_scope is not None:
+            d["path_scope"] = self.path_scope
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "CapabilityRequest":
-        return cls(effect=d["effect"], adapter=d.get("adapter", ""), scope=d.get("scope", {}))
+        return cls(
+            effect=d["effect"],
+            adapter=d.get("adapter", ""),
+            scope=d.get("scope", {}),
+            url_pattern=d.get("url_pattern"),
+            path_scope=d.get("path_scope"),
+        )
 
 
 @dataclass

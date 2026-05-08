@@ -51,6 +51,7 @@ from typing import Callable
 
 from wasmtime import Caller, FuncType, Linker, Memory, ValType
 
+from . import host_adapters
 from .cap_to_imports import APPROVAL_HOST
 from .effects import Effect
 from .wasi_minimal import WasiState
@@ -158,7 +159,11 @@ def _stub_body(effect: Effect) -> bytes:
     return json.dumps({"stub": True, "effect": effect.value}).encode("utf-8")
 
 
-def _make_no_approval_handler(state: WasiState, effect: Effect) -> Callable:
+def _make_no_approval_handler(
+    state:          WasiState,
+    effect:         Effect,
+    qualified_name: str,
+) -> Callable:
     def handler(
         caller:           Caller,
         handle:           int,
@@ -178,6 +183,18 @@ def _make_no_approval_handler(state: WasiState, effect: Effect) -> Callable:
         if not state.handle_table.validate(handle, effect, url=url, path=path):
             return ERRNO_DENIED
 
+        if host_adapters.has_adapter(qualified_name):
+            errno, body = host_adapters.ADAPTERS[qualified_name](payload)
+            if errno != ERRNO_SUCCESS:
+                return errno
+            return _write_response(
+                caller,
+                response_ptr,
+                response_max_len,
+                actual_len_ptr,
+                body,
+            )
+
         return _write_response(
             caller,
             response_ptr,
@@ -188,7 +205,11 @@ def _make_no_approval_handler(state: WasiState, effect: Effect) -> Callable:
     return handler
 
 
-def _make_approval_handler(state: WasiState, effect: Effect) -> Callable:
+def _make_approval_handler(
+    state:          WasiState,
+    effect:         Effect,
+    qualified_name: str,
+) -> Callable:
     def handler(
         caller:           Caller,
         handle:           int,
@@ -218,6 +239,18 @@ def _make_approval_handler(state: WasiState, effect: Effect) -> Callable:
         )
         if not ok:
             return ERRNO_DENIED
+
+        if host_adapters.has_adapter(qualified_name):
+            errno, body = host_adapters.ADAPTERS[qualified_name](payload)
+            if errno != ERRNO_SUCCESS:
+                return errno
+            return _write_response(
+                caller,
+                response_ptr,
+                response_max_len,
+                actual_len_ptr,
+                body,
+            )
 
         return _write_response(
             caller,
@@ -277,10 +310,10 @@ def define_into_linker(
         approval_required = qualified in APPROVAL_HOST
         if approval_required:
             params  = _params_approval()
-            handler = _make_approval_handler(state, effect)
+            handler = _make_approval_handler(state, effect, qualified)
         else:
             params  = _params_no_approval()
-            handler = _make_no_approval_handler(state, effect)
+            handler = _make_no_approval_handler(state, effect, qualified)
         func_type = FuncType(params, _results())
         linker.define_func(
             SKG_MODULE,

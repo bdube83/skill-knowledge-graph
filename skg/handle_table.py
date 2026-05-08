@@ -87,6 +87,12 @@ class HandleTable:
         """Return the handle for this id, or None if no such row."""
         return self._rows.get(handle_id)
 
+    def rows(self) -> list[GrantHandle]:
+        """Return all handle rows in mint order. Used by WASI host
+        wrappers that look up scope by effect rather than by id (path_*
+        WASI imports do not carry a handle argument)."""
+        return [self._rows[i] for i in sorted(self._rows)]
+
     def validate(
         self,
         handle_id:      int,

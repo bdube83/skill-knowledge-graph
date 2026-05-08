@@ -92,6 +92,38 @@ def _to_effects(granted_effects: list[str]) -> list[Effect]:
     return parsed
 
 
+def _load_manifest_scopes(manifest_path: Path) -> dict[Effect, tuple[str, str]]:
+    """Read per-effect URL and path scopes from a manifest YAML file.
+
+    Returns a dict keyed by Effect with `(url_pattern, path_scope)`
+    tuples. Effect strings outside the Effect enum are skipped. Missing
+    fields default to wildcard URL `*` and root path `/`. A missing or
+    unreadable manifest file returns an empty dict; the launcher then
+    falls back to wildcards for every effect.
+    """
+    try:
+        import yaml
+        data = yaml.safe_load(manifest_path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+
+    scopes: dict[Effect, tuple[str, str]] = {}
+    for entry in data.get("requested_capabilities", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        raw_effect = entry.get("effect")
+        if not raw_effect:
+            continue
+        try:
+            effect = Effect(raw_effect)
+        except ValueError:
+            continue
+        url_pattern = entry.get("url_pattern", "*") or "*"
+        path_scope  = entry.get("path_scope",  "/") or "/"
+        scopes[effect] = (url_pattern, path_scope)
+    return scopes
+
+
 class WasmtimeRuntime:
     """Wasmtime-based execution runtime for SKG WASI nodes.
 
@@ -120,8 +152,16 @@ class WasmtimeRuntime:
         context: dict[str, Any],
         granted_effects: list[str],
         dry_run: bool = False,
+        manifest_path: Path | None = None,
     ) -> WasmRunResult:
-        """Execute a WASI node and return the result."""
+        """Execute a WASI node and return the result.
+
+        When `manifest_path` is given the launcher reads per-effect
+        `url_pattern` and `path_scope` declarations from the manifest
+        and applies them to the minted handles. When `manifest_path` is
+        None the launcher mints wildcard handles for backward
+        compatibility with callers that have no manifest on disk.
+        """
         path = Path(wasm_path)
         if not path.exists():
             return WasmRunResult(
@@ -141,6 +181,15 @@ class WasmtimeRuntime:
         effects   = _to_effects(granted_effects)
         wasi_set  = wasi_imports_for(effects)
         host_set  = host_imports_for(effects) if not dry_run else frozenset()
+
+        # Stash manifest-declared scopes for `_mint_handles` to consume.
+        # Default to an empty dict so the wildcard fallback fires for
+        # every effect when the caller passes no manifest_path.
+        self._scopes_by_effect = (
+            _load_manifest_scopes(manifest_path)
+            if manifest_path is not None
+            else {}
+        )
 
         unsupported = wasi_minimal.unsupported_imports(wasi_set)
         if unsupported:
@@ -218,21 +267,28 @@ class WasmtimeRuntime:
     def _mint_handles(self, table, effects: list[Effect]) -> dict[str, int]:
         """Mint one handle per granted effect into `table`.
 
-        Default behaviour: wildcard URL pattern, root path scope,
-        approval_token=1 for the three approval-gated effects. Subclass
-        and override to inject test-specific scopes.
+        Per-effect scopes come from `self._scopes_by_effect`, which the
+        launcher populates from the node manifest at the start of
+        `execute()`. Effects without a manifest scope fall back to
+        wildcard URL `*` and root path `/`, preserving the previous
+        behaviour for callers that pass no manifest_path. Subclasses
+        may still override this method to inject test-specific scopes.
         """
         approval_effects = {
             Effect.EXTERNAL_SEND,
             Effect.GIT_WRITE,
             Effect.PRODUCTION_WRITE,
         }
+        scopes_by_effect: dict[Effect, tuple[str, str]] = getattr(
+            self, "_scopes_by_effect", {}
+        )
         handles: dict[str, int] = {}
         for effect in effects:
+            url_pattern, path_str = scopes_by_effect.get(effect, ("*", "/"))
             handle_id = table.mint(
                 effect,
-                url_pattern="*",
-                path_scope=Path("/"),
+                url_pattern=url_pattern,
+                path_scope=Path(path_str),
                 approval_token=1 if effect in approval_effects else 0,
             )
             handles[effect.value] = handle_id
