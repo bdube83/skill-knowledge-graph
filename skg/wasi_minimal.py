@@ -23,6 +23,7 @@ not shared across runs with different grants.
 from __future__ import annotations
 
 import os
+import struct
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO, Callable
@@ -410,11 +411,37 @@ def _path_filestat_get(state: WasiState) -> Callable:
         if not candidate.exists():
             return ERRNO_NOENT
 
-        # Stub filestat: 64 zero bytes. Real fields (dev, ino, filetype,
-        # nlink, size, atim, mtim, ctim) are not surfaced; tests that
-        # need them belong to a later phase.
         try:
-            memory.write(caller, b"\x00" * 64, buf_ptr)
+            stat_result = candidate.stat()
+        except OSError:
+            return ERRNO_IO
+
+        if candidate.is_dir():
+            filetype = 3
+        elif candidate.is_symlink():
+            filetype = 7
+        elif candidate.is_file():
+            filetype = 4
+        else:
+            filetype = 0
+
+        # WASI snapshot preview1 filestat layout, 64 bytes total:
+        #   dev (u64, 8) ino (u64, 8) filetype (u8 + 7 padding, 8)
+        #   nlink (u64, 8) size (u64, 8)
+        #   atim mtim ctim (u64 nanos each, 24)
+        try:
+            packed = struct.pack(
+                "<QQB7xQQQQQ",
+                stat_result.st_dev      & 0xFFFFFFFFFFFFFFFF,
+                stat_result.st_ino      & 0xFFFFFFFFFFFFFFFF,
+                filetype,
+                stat_result.st_nlink    & 0xFFFFFFFFFFFFFFFF,
+                stat_result.st_size     & 0xFFFFFFFFFFFFFFFF,
+                int(stat_result.st_atime_ns),
+                int(stat_result.st_mtime_ns),
+                int(stat_result.st_ctime_ns),
+            )
+            memory.write(caller, packed, buf_ptr)
         except Exception:
             return ERRNO_INVAL
         return ERRNO_SUCCESS

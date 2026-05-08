@@ -77,6 +77,7 @@ _HOST_TO_EFFECT: dict[str, Effect] = {
     "skg.git_write":        Effect.GIT_WRITE,
     "skg.secret_read":      Effect.SECRET_READ,
     "skg.production_write": Effect.PRODUCTION_WRITE,
+    "skg.text_generate":    Effect.TEXT_GENERATE,
 }
 
 

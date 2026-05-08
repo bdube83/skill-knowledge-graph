@@ -24,6 +24,7 @@ class Effect(str, Enum):
     GIT_WRITE        = "git.write"
     SECRET_READ      = "secret.read"
     PRODUCTION_WRITE = "production.write"
+    TEXT_GENERATE    = "text.generate"
 
 
 # Effects that require human approval before any execution.

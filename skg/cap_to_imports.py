@@ -49,6 +49,7 @@ EFFECT_HOST: dict[Effect, frozenset[str]] = {
     Effect.GIT_WRITE:        frozenset({"skg.git_write"}),
     Effect.SECRET_READ:      frozenset({"skg.secret_read"}),
     Effect.PRODUCTION_WRITE: frozenset({"skg.production_write"}),
+    Effect.TEXT_GENERATE:    frozenset({"skg.text_generate"}),
 }
 
 
