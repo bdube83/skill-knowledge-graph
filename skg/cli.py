@@ -412,6 +412,7 @@ KNOWN_CLIENTS = (
     "cursor",
     "chatgpt-desktop",
     "codex",
+    "copilot",
 )
 
 # Hosts whose config-file location and key layout we can write directly.
@@ -448,9 +449,21 @@ _CONFIG_TARGETS: dict[str, dict[str, Any]] = {
         "key":    "mcpServers",
         "certain": False,
         "note":   (
-            "Codex CLI MCP config path is not stable across versions. "
-            "Paste the snippet per the Codex docs."
+            "Codex CLI 0.129+ accepts MCP servers via "
+            "`codex mcp add <name> -- <command>`. The on-disk path "
+            "is `~/.codex/config.toml` under `[mcp.servers.<name>]`, "
+            "which is TOML and not directly mergeable from this "
+            "JSON-shaped snippet. Use the `codex mcp add` CLI."
         ),
+    },
+    "copilot": {
+        "path":   "~/.copilot/mcp-config.json",
+        "key":    "mcpServers",
+        "certain": True,
+        "stdio_extras": {
+            "type":  "stdio",
+            "tools": ["*"],
+        },
     },
 }
 
@@ -529,6 +542,9 @@ def cmd_install(args: argparse.Namespace) -> int:
 
     target = _CONFIG_TARGETS[client]
     snippet = _mcp_snippet(command=getattr(args, "launch_command", None))
+    extras = target.get("stdio_extras")
+    if isinstance(extras, dict):
+        snippet["skg"].update(extras)
     block = {target["key"]: snippet}
     print(json.dumps(block, indent=2))
 
