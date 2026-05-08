@@ -1,18 +1,34 @@
-# 🛡️ Skill Knowledge Graph
+# 🦾 Skill Knowledge Graph
 
-> Capability-token enforcement for LLM-synthesized code.
-> The runtime is the gate, not the manifest.
+> Stop paying the LLM for work it has already done.
+> Route recurring agent tasks to verified procedures, fall back to
+> the LLM only on misses, enforce capability tokens at the WASM
+> import layer for every external call.
 
 ![Python](https://img.shields.io/badge/python-3.13%2B-blue)
 ![Tests](https://img.shields.io/badge/tests-221%20passing-green)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Status](https://img.shields.io/badge/status-research%20preview-orange)
 
-When an LLM agent runs code, the manifest tells you what the code
-is *supposed* to do. SKG makes the WASM runtime physically prevent
-anything else, on every call, with per-run capability tokens.
+## 🔥 Three measured wins
 
-![Containment differential](figures/marketing_attack_containment.png)
+| What you get | Measured number | Source |
+|---|---|---|
+| 💰 **Cuts input tokens on long-context recurring tasks** | **528 tokens / task saved (~36%)** on a 200-task corpus, 95% bootstrap CI [442, 628] | `eval/h1_stats.py` against gpt-4o-mini |
+| ⚡ **Latency drops four orders of magnitude on hits** | 0.16 ms p50 vs 3082 ms p50 (Baseline A) | `eval/results/seeded_aggregated.json` |
+| 🛡️ **Stops attacks the manifest model misses** | 13 / 13 contained vs 5 / 13 for declared-capability baseline | `tests/test_containment_matrix.py` |
+
+![Token savings on long-context tasks](figures/marketing_token_savings.png)
+
+**Honest scope on the cost win:** the savings show up on long-context
+recurring tasks. The break-even per-task LLM input is the SKG routing
+header (~120 tokens). Below that, SKG adds cost; above that, SKG saves
+proportionally to the hit rate. On a 90-token-mean toy corpus SKG runs
+26% MORE expensive than LLM-only; on the 1265-token-median realistic
+corpus SKG saves 36%. This is measured, not extrapolated. See
+`paper.md` Section 7.4.
+
+![Attack containment](figures/marketing_attack_containment.png)
 
 > Adversarial-corpus differential: **SKG contains 13 / 13 attacks**
 > across manifest-lies, path-escape, and WASI-introspection classes.
